@@ -72,12 +72,8 @@ export const parseRubricFromFile = async (
   const response = await ai.models.generateContent({
     model: 'gemini-3-flash-preview',
     contents: [
-      {
-        parts: [
-          { inlineData: { data: base64Data, mimeType: mimeType } },
-          { text: "Extract the grading rubric from this document. Return the result in the specified JSON format. If the document doesn't specify points, default to 10." },
-        ],
-      },
+      { inlineData: { data: base64Data, mimeType: mimeType } },
+      "Extract the grading rubric from this document. Return the result in the specified JSON format. If the document doesn't specify points, default to 10.",
     ],
     config: {
       responseMimeType: "application/json",
@@ -153,20 +149,14 @@ The output must be strictly valid JSON.`;
   }
 
   if (submission.url) {
-    contents.push({
-      parts: [{ text: `Grade the student submission at ${submission.url}. ${config.autoInsertFeedback ? 'Use appendFeedbackToDoc to insert results if scoring is successful.' : ''}` }]
-    });
+    contents.push(`Grade the student submission at ${submission.url}. ${config.autoInsertFeedback ? 'Use appendFeedbackToDoc to insert results if scoring is successful.' : ''}`);
   } else if (submission.fileData) {
-    contents.push({
-      parts: [
-        { inlineData: { data: submission.fileData.data, mimeType: submission.fileData.mimeType } },
-        { text: `Grade this student submission.` }
-      ]
-    });
+    contents.push(
+      { inlineData: { data: submission.fileData.data, mimeType: submission.fileData.mimeType } },
+      `Grade this student submission.`
+    );
   } else {
-    contents.push({
-      parts: [{ text: `Student Submission Content:\n\n${submission.content}` }]
-    });
+    contents.push(`Student Submission Content:\n\n${submission.content}`);
   }
 
   const response = await ai.models.generateContent({
