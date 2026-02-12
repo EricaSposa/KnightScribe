@@ -1,5 +1,5 @@
 
-import { GoogleGenAI, Type, FunctionDeclaration } from "@google/genai";
+import { GoogleGenAI, Type, FunctionDeclaration, ThinkingLevel } from "@google/genai";
 import { GradingConfig, GradeResult, RubricCriterion, Submission, FeedbackStyle } from "../types";
 
 // Always use process.env.API_KEY directly when initializing the client.
@@ -168,7 +168,7 @@ The output must be strictly valid JSON.`;
       responseSchema,
       tools: tools.length > 0 ? tools : undefined,
       temperature: 0.1,
-      thinkingConfig: { thinkingBudget: 4000 }
+      thinkingConfig: { thinkingLevel: ThinkingLevel.HIGH }
     },
   });
 
