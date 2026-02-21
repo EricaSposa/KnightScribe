@@ -1,14 +1,14 @@
 
 import React, { useState } from 'react';
 import { GradingConfig, GradeLevel, Submission, FeedbackStyle } from './types';
-import { gradeSubmission, insertFeedbackIntoDoc } from './services/geminiService';
+import { gradeSubmission, insertFeedbackIntoDoc, testOllamaConnection } from './services/ollamaService';
 import RubricEditor from './components/RubricEditor';
 import SubmissionManager from './components/SubmissionManager';
 import ResultDashboard from './components/ResultDashboard';
 import { 
   Settings, Users, GraduationCap, Play, ChevronRight, 
   CheckCircle2, LayoutDashboard, Sparkles, BookOpen, 
-  BarChart3, Lightbulb, Target
+  BarChart3, Lightbulb, Target, Zap, Loader2
 } from 'lucide-react';
 
 const GRADE_LEVELS: GradeLevel[] = [
@@ -61,6 +61,18 @@ const App: React.FC = () => {
   const [step, setStep] = useState<1 | 2 | 3>(1);
   const [isGrading, setIsGrading] = useState(false);
   const [isInserting, setIsInserting] = useState(false);
+  const [testResult, setTestResult] = useState<{ status: 'idle' | 'loading' | 'success' | 'error'; message?: string }>({ status: 'idle' });
+
+  const handleTestApi = async () => {
+    setTestResult({ status: 'loading' });
+    const result = await testOllamaConnection();
+    if (result.success) {
+      setTestResult({ status: 'success', message: result.response });
+    } else {
+      setTestResult({ status: 'error', message: result.error });
+    }
+    setTimeout(() => setTestResult({ status: 'idle' }), 5000);
+  };
   const [config, setConfig] = useState<GradingConfig>({
     prompt: '',
     gradeLevel: 'High School (9-12)',
@@ -176,7 +188,23 @@ const App: React.FC = () => {
             </div>
           </div>
           
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-3">
+            <button
+              onClick={handleTestApi}
+              disabled={testResult.status === 'loading'}
+              className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium transition-all border ${
+                testResult.status === 'success' ? 'bg-emerald-50 border-emerald-300 text-emerald-700' :
+                testResult.status === 'error' ? 'bg-rose-50 border-rose-300 text-rose-700' :
+                testResult.status === 'loading' ? 'bg-amber-50 border-amber-300 text-amber-700' :
+                'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'
+              }`}
+              title={testResult.message || 'Test Ollama API connection'}
+            >
+              {testResult.status === 'loading' ? <Loader2 size={14} className="animate-spin" /> : <Zap size={14} />}
+              {testResult.status === 'loading' ? 'Testing...' :
+               testResult.status === 'success' ? 'Connected!' :
+               testResult.status === 'error' ? 'Failed' : 'Test API'}
+            </button>
             <nav className="hidden md:flex items-center bg-slate-50 p-1 rounded-lg border border-slate-200">
               <button onClick={() => setStep(1)} className={`px-4 py-1.5 rounded-md text-sm font-medium transition-all flex items-center gap-2 ${step === 1 ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
                 <Settings size={16} /> Setup

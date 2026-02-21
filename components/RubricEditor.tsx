@@ -2,7 +2,7 @@
 import React, { useState } from 'react';
 import { RubricCriterion } from '../types';
 import { Plus, Trash2, FileUp, Loader2, Sparkles, Link as LinkIcon, Globe } from 'lucide-react';
-import { parseRubricFromFile, parseRubricFromUrl } from '../services/geminiService';
+import { parseRubricFromFile, parseRubricFromUrl } from '../services/ollamaService';
 
 interface Props {
   rubric: RubricCriterion[];
