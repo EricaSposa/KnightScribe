@@ -8,7 +8,7 @@ export const testOllamaConnection = async (): Promise<{ success: boolean; respon
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: 'gemma3',
+        model: 'gemma3:12b',
         messages: [{ role: 'user', content: 'Say "Hello from Ollama!" in exactly 5 words.' }],
         stream: false,
       }),
@@ -24,7 +24,7 @@ export const testOllamaConnection = async (): Promise<{ success: boolean; respon
     return { success: false, error: err.message || 'Unknown error' };
   }
 };
-const MODEL_NAME = 'gemma3';
+const MODEL_NAME = 'gemma3:12b';
 
 interface OllamaMessage {
   role: 'system' | 'user' | 'assistant';
