@@ -46,6 +46,14 @@ interface OllamaResponse {
   };
 }
 
+const toFiniteNumber = (value: unknown, fallback: number): number => {
+  const num = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(num) ? num : fallback;
+};
+
+const clampScore = (score: number, maxPoints: number): number =>
+  Math.min(Math.max(score, 0), maxPoints);
+
 const parseModelJson = (raw: string): any => {
   const trimmed = raw.trim();
 
@@ -64,6 +72,68 @@ const parseModelJson = (raw: string): any => {
 
     throw new Error('Could not parse JSON from model output.');
   }
+};
+
+const normalizeGradeResult = (
+  config: GradingConfig,
+  parsed: any
+): GradeResult => {
+  const rawCriterionResults = Array.isArray(parsed?.criterionResults) ? parsed.criterionResults : [];
+
+  // When structured rubric exists, totals are derived strictly from rubric rows.
+  if (config.rubric.length > 0) {
+    const rawById = new Map<string, any>();
+    for (const row of rawCriterionResults) {
+      if (row?.criterionId && !rawById.has(String(row.criterionId))) {
+        rawById.set(String(row.criterionId), row);
+      }
+    }
+
+    const normalizedCriterionResults = config.rubric.map((criterion) => {
+      const raw = rawById.get(criterion.id) || {};
+      const score = clampScore(toFiniteNumber(raw.score, 0), criterion.maxPoints);
+      const feedback =
+        typeof raw.feedback === 'string' && raw.feedback.trim().length > 0
+          ? raw.feedback.trim()
+          : 'No criterion-level feedback provided.';
+
+      return {
+        criterionId: criterion.id,
+        score,
+        feedback,
+      };
+    });
+
+    const totalScore = normalizedCriterionResults.reduce((sum, row) => sum + row.score, 0);
+    const maxPossibleScore = config.rubric.reduce((sum, row) => sum + row.maxPoints, 0);
+    const overallFeedback =
+      typeof parsed?.overallFeedback === 'string' && parsed.overallFeedback.trim().length > 0
+        ? parsed.overallFeedback.trim()
+        : 'No overall feedback provided.';
+
+    return {
+      totalScore,
+      maxPossibleScore,
+      overallFeedback,
+      criterionResults: normalizedCriterionResults,
+    };
+  }
+
+  // Fallback: no structured rubric rows to anchor to.
+  const normalizedCriterionResults = rawCriterionResults.map((row: any) => ({
+    criterionId: String(row?.criterionId || 'criterion'),
+    score: toFiniteNumber(row?.score, 0),
+    feedback: typeof row?.feedback === 'string' ? row.feedback : '',
+  }));
+  const totalFromRows = normalizedCriterionResults.reduce((sum: number, row: any) => sum + row.score, 0);
+  const maxFromModel = toFiniteNumber(parsed?.maxPossibleScore, totalFromRows);
+
+  return {
+    totalScore: totalFromRows,
+    maxPossibleScore: maxFromModel,
+    overallFeedback: typeof parsed?.overallFeedback === 'string' ? parsed.overallFeedback : '',
+    criterionResults: normalizedCriterionResults,
+  };
 };
 
 const callOllama = async (
@@ -213,6 +283,10 @@ ${structuredRubricBlock}${uploadedRubricBlock}
 You MUST respond with valid JSON in this exact format:
 ${GRADE_RESULT_JSON_SCHEMA}
 
+Critical scoring rule:
+- "totalScore" MUST equal the exact sum of all criterionResults[i].score.
+- "maxPossibleScore" MUST equal the exact sum of all rubric max points.
+
 The output must be strictly valid JSON with no additional text.`;
 
   const messages: OllamaMessage[] = [
@@ -240,7 +314,8 @@ The output must be strictly valid JSON with no additional text.`;
   const responseText = await callOllama(messages, true);
   
   if (!responseText) throw new Error("No response generated from AI.");
-  const result = parseModelJson(responseText) as GradeResult;
+  const parsed = parseModelJson(responseText);
+  const result = normalizeGradeResult(config, parsed);
   
   return { result, feedbackInserted: false };
 };
