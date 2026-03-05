@@ -78,6 +78,7 @@ const App: React.FC = () => {
     gradeLevel: 'High School (9-12)',
     feedbackStyle: 'scoring_with_feedback',
     autoInsertFeedback: false,
+    rubricContext: '',
     rubric: [
       { id: '1', name: 'Structure', description: 'Logical flow and paragraph organization.', maxPoints: 10 },
       { id: '2', name: 'Clarity', description: 'Precision of language and lack of ambiguity.', maxPoints: 10 },
@@ -324,13 +325,18 @@ const App: React.FC = () => {
               </section>
 
               <section className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
-                <RubricEditor rubric={config.rubric} setRubric={(r) => setConfig({ ...config, rubric: r })} />
+                <RubricEditor
+                  rubric={config.rubric}
+                  setRubric={(r) => setConfig({ ...config, rubric: r })}
+                  rubricContext={config.rubricContext}
+                  setRubricContext={(context) => setConfig({ ...config, rubricContext: context })}
+                />
               </section>
 
               <div className="flex justify-end">
                 <button
                   onClick={() => setStep(2)}
-                  disabled={!config.prompt || config.rubric.length === 0}
+                  disabled={!config.prompt || (config.rubric.length === 0 && !config.rubricContext.trim())}
                   className="flex items-center gap-2 px-8 py-3 bg-slate-800 text-white rounded-xl hover:bg-slate-900 transition-all font-semibold disabled:opacity-50 shadow-lg"
                 >
                   Continue to Submissions <ChevronRight size={20} />

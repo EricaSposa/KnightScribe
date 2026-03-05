@@ -1,7 +1,8 @@
 
 import React, { useState } from 'react';
-import { Submission, FileData } from '../types';
-import { FileUp, Trash2, UserPlus, FileText, FileCheck, Link as LinkIcon, Globe, FileCode } from 'lucide-react';
+import { Submission } from '../types';
+import { FileUp, Trash2, UserPlus, FileText, FileCheck, Link as LinkIcon, Globe, Loader2 } from 'lucide-react';
+import { processSubmissionUpload } from '../services/documentProcessingService';
 
 interface Props {
   submissions: Submission[];
@@ -13,6 +14,7 @@ const SubmissionManager: React.FC<Props> = ({ submissions, setSubmissions }) => 
   const [newContent, setNewContent] = useState('');
   const [newUrl, setNewUrl] = useState('');
   const [showUrlInput, setShowUrlInput] = useState(false);
+  const [isProcessingFiles, setIsProcessingFiles] = useState(false);
 
   const addManualSubmission = () => {
     if (!newStudentName.trim() || !newContent.trim()) return;
@@ -20,6 +22,7 @@ const SubmissionManager: React.FC<Props> = ({ submissions, setSubmissions }) => 
       id: Math.random().toString(36).substr(2, 9),
       studentName: newStudentName,
       content: newContent,
+      origin: 'manual',
       status: 'pending',
     };
     setSubmissions((prev) => [...prev, newSub]);
@@ -34,6 +37,7 @@ const SubmissionManager: React.FC<Props> = ({ submissions, setSubmissions }) => 
       studentName: newStudentName,
       content: `[Link Submission: ${newUrl}]`,
       url: newUrl,
+      origin: 'url',
       status: 'pending',
     };
     setSubmissions((prev) => [...prev, newSub]);
@@ -42,44 +46,41 @@ const SubmissionManager: React.FC<Props> = ({ submissions, setSubmissions }) => 
     setShowUrlInput(false);
   };
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files) return;
 
-    Array.from(files).forEach((file) => {
-      const reader = new FileReader();
-      const isMultimodal = file.type === 'application/pdf' || file.type.includes('wordprocessingml');
-      
-      reader.onload = (event) => {
-        const result = event.target?.result as string;
-        let fileData: FileData | undefined;
-        let content = '';
+    setIsProcessingFiles(true);
+    const processErrors: string[] = [];
 
-        if (isMultimodal) {
-          const base64 = result.split(',')[1];
-          fileData = { data: base64, mimeType: file.type };
-          content = `[File Document: ${file.name}]`;
-        } else {
-          content = result;
+    try {
+      for (let index = 0; index < files.length; index += 1) {
+        const file = files.item(index);
+        if (!file) continue;
+
+        try {
+          const processed = await processSubmissionUpload(file);
+          const newSub: Submission = {
+            id: Math.random().toString(36).substr(2, 9),
+            studentName: file.name.replace(/\.[^/.]+$/, ""),
+            content: processed.content,
+            origin: 'uploaded_file',
+            status: 'pending',
+          };
+          setSubmissions((prev) => [...prev, newSub]);
+        } catch (error) {
+          console.error(`Failed to process ${file.name}:`, error);
+          processErrors.push(file.name);
         }
-
-        const newSub: Submission = {
-          id: Math.random().toString(36).substr(2, 9),
-          studentName: file.name.replace(/\.[^/.]+$/, ""),
-          content: content,
-          fileData: fileData,
-          status: 'pending',
-        };
-        setSubmissions((prev) => [...prev, newSub]);
-      };
-
-      if (isMultimodal) {
-        reader.readAsDataURL(file);
-      } else {
-        reader.readAsText(file);
       }
-    });
-    e.target.value = '';
+
+      if (processErrors.length > 0) {
+        alert(`Some files could not be processed: ${processErrors.join(', ')}`);
+      }
+    } finally {
+      setIsProcessingFiles(false);
+      e.target.value = '';
+    }
   };
 
   const removeSubmission = (id: string) => {
@@ -145,16 +146,24 @@ const SubmissionManager: React.FC<Props> = ({ submissions, setSubmissions }) => 
           </div>
           <div>
             <h4 className="font-semibold text-slate-700">Batch Upload Submissions</h4>
-            <p className="text-xs text-slate-500 px-4 mt-1">Upload multiple .txt, .pdf, or .docx files. Gemini reads them all.</p>
+            <p className="text-xs text-slate-500 px-4 mt-1">Upload .txt, .pdf, .docx, or image files. PDF/image files are OCR-converted to markdown first.</p>
           </div>
-          <label className="cursor-pointer bg-slate-800 text-white px-6 py-2 rounded-lg hover:bg-slate-900 transition-colors font-medium">
-            Choose Files
+          <label className={`bg-slate-800 text-white px-6 py-2 rounded-lg transition-colors font-medium ${isProcessingFiles ? 'opacity-70 pointer-events-none' : 'cursor-pointer hover:bg-slate-900'}`}>
+            {isProcessingFiles ? (
+              <span className="inline-flex items-center gap-2">
+                <Loader2 size={16} className="animate-spin" />
+                Processing...
+              </span>
+            ) : (
+              'Choose Files'
+            )}
             <input
               type="file"
               multiple
-              accept=".txt,.pdf,.docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+              accept=".txt,.md,.pdf,.docx,image/*,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
               className="hidden"
               onChange={handleFileUpload}
+              disabled={isProcessingFiles}
             />
           </label>
         </div>
@@ -177,16 +186,16 @@ const SubmissionManager: React.FC<Props> = ({ submissions, setSubmissions }) => 
           {submissions.map((sub) => (
             <div key={sub.id} className="flex items-center gap-3 p-3 bg-white border border-slate-200 rounded-lg shadow-sm group hover:border-indigo-100 transition-colors">
               <div className={`p-2 rounded ${
-                sub.url ? 'bg-sky-50 text-sky-500' : 
-                sub.fileData ? 'bg-emerald-50 text-emerald-500' : 
+                sub.origin === 'url' ? 'bg-sky-50 text-sky-500' : 
+                sub.origin === 'uploaded_file' ? 'bg-emerald-50 text-emerald-500' : 
                 'bg-indigo-50 text-indigo-500'
               }`}>
-                {sub.url ? <Globe size={20} /> : sub.fileData ? <FileCheck size={20} /> : <FileText size={20} />}
+                {sub.origin === 'url' ? <Globe size={20} /> : sub.origin === 'uploaded_file' ? <FileCheck size={20} /> : <FileText size={20} />}
               </div>
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-medium text-slate-700 truncate">{sub.studentName}</p>
                 <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">
-                  {sub.url ? 'Link' : sub.fileData ? 'Document' : 'Text'}
+                  {sub.origin === 'url' ? 'Link' : sub.origin === 'uploaded_file' ? 'Document' : 'Text'}
                 </p>
               </div>
               <button

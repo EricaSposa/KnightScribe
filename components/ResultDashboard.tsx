@@ -241,7 +241,7 @@ const ResultDashboard: React.FC<Props> = ({ submissions, rubric, onRetry, onBatc
                       return (
                         <div key={res.criterionId} className="bg-white p-4 border border-slate-200 rounded-lg shadow-sm">
                           <div className="flex justify-between items-start mb-2">
-                            <span className="font-semibold text-slate-700 text-sm">{criterion?.name || 'Unknown Criterion'}</span>
+                            <span className="font-semibold text-slate-700 text-sm">{criterion?.name || res.criterionId || 'Criterion'}</span>
                             <span className="px-2 py-0.5 bg-indigo-50 text-indigo-600 rounded text-xs font-bold">
                               {res.score} / {criterion?.maxPoints || '?'}
                             </span>

@@ -46,6 +46,26 @@ interface OllamaResponse {
   };
 }
 
+const parseModelJson = (raw: string): any => {
+  const trimmed = raw.trim();
+
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    const fencedMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+    if (fencedMatch?.[1]) {
+      return JSON.parse(fencedMatch[1].trim());
+    }
+
+    const jsonObjectMatch = trimmed.match(/\{[\s\S]*\}/);
+    if (jsonObjectMatch?.[0]) {
+      return JSON.parse(jsonObjectMatch[0]);
+    }
+
+    throw new Error('Could not parse JSON from model output.');
+  }
+};
+
 const callOllama = async (
   messages: OllamaMessage[],
   jsonFormat: boolean = false
@@ -116,9 +136,8 @@ const GRADE_RESULT_JSON_SCHEMA = `{
   ]
 }`;
 
-export const parseRubricFromFile = async (
-  base64Data: string,
-  mimeType: string
+export const parseRubricFromMarkdown = async (
+  rubricMarkdown: string
 ): Promise<RubricCriterion[]> => {
   const messages: OllamaMessage[] = [
     {
@@ -129,14 +148,16 @@ If the document doesn't specify points, default to 10.`
     },
     {
       role: 'user',
-      content: 'Extract the grading rubric from this document. Return the result in the specified JSON format.',
-      images: [base64Data]
+      content: `Extract the grading rubric from this markdown/text. Return the result in the specified JSON format.
+
+Document:
+${rubricMarkdown}`
     }
   ];
 
   const responseText = await callOllama(messages, true);
-  const result = JSON.parse(responseText.trim());
-  return result.criteria;
+  const result = parseModelJson(responseText);
+  return result.criteria || [];
 };
 
 export const parseRubricFromUrl = async (url: string): Promise<RubricCriterion[]> => {
@@ -154,7 +175,7 @@ If the document doesn't specify points, default to 10.`
   ];
 
   const responseText = await callOllama(messages, true);
-  const result = JSON.parse(responseText.trim());
+  const result = parseModelJson(responseText);
   return result.criteria;
 };
 
@@ -163,6 +184,20 @@ export const gradeSubmission = async (
   submission: Submission
 ): Promise<{ result: GradeResult; feedbackInserted: boolean }> => {
   const styleInstruction = getFeedbackInstruction(config.feedbackStyle);
+  const hasStructuredRubric = config.rubric.length > 0;
+  const hasRubricContext = !!config.rubricContext?.trim();
+
+  if (!hasStructuredRubric && !hasRubricContext) {
+    throw new Error('No rubric data provided. Add rubric criteria or upload a rubric document.');
+  }
+
+  const structuredRubricBlock = hasStructuredRubric
+    ? config.rubric.map(c => `- [ID: ${c.id}] ${c.name} (Max ${c.maxPoints} pts): ${c.description}`).join('\n')
+    : 'No manually structured rubric criteria were provided.';
+
+  const uploadedRubricBlock = hasRubricContext
+    ? `\nUploaded rubric reference:\n${config.rubricContext}`
+    : '';
   
   const systemPrompt = `You are a professional academic grader. 
 Target Grade Level: ${config.gradeLevel}
@@ -170,7 +205,7 @@ Assignment Prompt: ${config.prompt}
 Feedback Style: ${styleInstruction}
 
 Grading Standards:
-${config.rubric.map(c => `- [ID: ${c.id}] ${c.name} (Max ${c.maxPoints} pts): ${c.description}`).join('\n')}
+${structuredRubricBlock}${uploadedRubricBlock}
 
 You MUST respond with valid JSON in this exact format:
 ${GRADE_RESULT_JSON_SCHEMA}
@@ -202,7 +237,7 @@ The output must be strictly valid JSON with no additional text.`;
   const responseText = await callOllama(messages, true);
   
   if (!responseText) throw new Error("No response generated from AI.");
-  const result = JSON.parse(responseText.trim()) as GradeResult;
+  const result = parseModelJson(responseText) as GradeResult;
   
   return { result, feedbackInserted: false };
 };

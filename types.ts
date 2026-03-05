@@ -24,6 +24,7 @@ export interface Submission {
   content: string; // text representation
   url?: string; // Optional URL for Google Docs
   fileData?: FileData; // optional binary data for better AI understanding
+  origin?: 'manual' | 'url' | 'uploaded_file';
   status: 'pending' | 'grading' | 'completed' | 'error';
   result?: GradeResult;
   feedbackInserted?: boolean;
@@ -51,6 +52,7 @@ export type GradeLevel =
 export interface GradingConfig {
   prompt: string;
   rubric: RubricCriterion[];
+  rubricContext: string;
   gradeLevel: GradeLevel;
   feedbackStyle: FeedbackStyle;
   autoInsertFeedback: boolean;

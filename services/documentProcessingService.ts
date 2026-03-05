@@ -1,0 +1,242 @@
+import { getDocument, GlobalWorkerOptions } from 'pdfjs-dist';
+import * as mammoth from 'mammoth';
+
+const OLLAMA_API_URL = '/ollama/api/chat';
+const OCR_MODEL = 'deepseek-ocr:latest';
+const OCR_PROMPT = '<image>\n<|grounding|>Convert the document to markdown.';
+
+GlobalWorkerOptions.workerSrc = new URL(
+  'pdfjs-dist/build/pdf.worker.mjs',
+  import.meta.url
+).toString();
+
+interface OllamaOcrResponse {
+  message?: {
+    content?: string;
+  };
+}
+
+type SourceKind = 'pdf' | 'docx' | 'image' | 'text';
+
+export interface ProcessedRubricDocument {
+  markdown: string;
+  context: string;
+  sourceKind: SourceKind;
+  pageCount: number;
+}
+
+export interface ProcessedSubmissionDocument {
+  content: string;
+  markdown: string;
+  sourceKind: SourceKind;
+  pageCount: number;
+}
+
+const isPdfFile = (file: File): boolean =>
+  file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
+
+const isDocxFile = (file: File): boolean =>
+  file.type.includes('wordprocessingml') || file.name.toLowerCase().endsWith('.docx');
+
+const isImageFile = (file: File): boolean =>
+  file.type.startsWith('image/');
+
+const isTextFile = (file: File): boolean => {
+  const lowerName = file.name.toLowerCase();
+  return file.type.startsWith('text/') || lowerName.endsWith('.txt') || lowerName.endsWith('.md');
+};
+
+const readAsDataUrl = (file: File): Promise<string> =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = () => reject(new Error(`Failed to read ${file.name}`));
+    reader.readAsDataURL(file);
+  });
+
+const fileToBase64 = async (file: File): Promise<string> => {
+  const dataUrl = await readAsDataUrl(file);
+  const [, base64 = ''] = dataUrl.split(',');
+  if (!base64) throw new Error(`Could not encode ${file.name} as base64.`);
+  return base64;
+};
+
+const runOcrForImage = async (imageBase64: string): Promise<string> => {
+  const response = await fetch(OLLAMA_API_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: OCR_MODEL,
+      stream: false,
+      messages: [
+        {
+          role: 'user',
+          content: OCR_PROMPT,
+          images: [imageBase64],
+        },
+      ],
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`OCR request failed: ${response.status} ${response.statusText}`);
+  }
+
+  const data = (await response.json()) as OllamaOcrResponse;
+  return (data.message?.content || '').trim();
+};
+
+const flattenImagePagesToMarkdown = async (pages: string[]): Promise<string> => {
+  const pageMarkdown: string[] = [];
+
+  for (let index = 0; index < pages.length; index += 1) {
+    const pageResult = await runOcrForImage(pages[index]);
+    const header = pages.length > 1 ? `<!-- Page ${index + 1} -->\n` : '';
+    pageMarkdown.push(`${header}${pageResult}`.trim());
+  }
+
+  return pageMarkdown.join('\n\n');
+};
+
+const convertPdfToImagePages = async (file: File): Promise<string[]> => {
+  const pdfBytes = await file.arrayBuffer();
+  const pdf = await getDocument({ data: pdfBytes }).promise;
+  const imagePages: string[] = [];
+
+  for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
+    const page = await pdf.getPage(pageNumber);
+    const viewport = page.getViewport({ scale: 2 });
+    const canvas = document.createElement('canvas');
+    const canvasContext = canvas.getContext('2d');
+
+    if (!canvasContext) {
+      throw new Error('Unable to initialize canvas rendering context for PDF conversion.');
+    }
+
+    canvas.width = Math.ceil(viewport.width);
+    canvas.height = Math.ceil(viewport.height);
+
+    await page.render({ canvas, canvasContext, viewport }).promise;
+
+    const dataUrl = canvas.toDataURL('image/png');
+    const [, base64 = ''] = dataUrl.split(',');
+    if (!base64) {
+      throw new Error(`Failed to convert PDF page ${pageNumber} into an image.`);
+    }
+    imagePages.push(base64);
+  }
+
+  return imagePages;
+};
+
+const convertDocxToText = async (file: File): Promise<string> => {
+  const buffer = await file.arrayBuffer();
+  const result = await mammoth.extractRawText({ arrayBuffer: buffer });
+  return result.value.trim();
+};
+
+const formatRubricContext = (markdown: string, sourceKind: SourceKind, pageCount: number): string => {
+  const sourceDescription =
+    sourceKind === 'pdf'
+      ? `PDF (${pageCount} page${pageCount === 1 ? '' : 's'})`
+      : sourceKind === 'image'
+        ? 'image upload'
+        : sourceKind === 'docx'
+          ? 'DOCX text extraction'
+          : 'text upload';
+
+  return [
+    'Rubric reference (uploaded document):',
+    `This rubric was extracted from a ${sourceDescription}.`,
+    sourceKind === 'docx' || sourceKind === 'text'
+      ? 'Formatting: plain extracted text from the source document.'
+      : 'Formatting: OCR markdown generated by deepseek-ocr:latest, which may include HTML-like blocks.',
+    '',
+    'Rubric content:',
+    markdown.trim(),
+  ].join('\n');
+};
+
+const formatSubmissionContext = (
+  fileName: string,
+  markdown: string,
+  sourceKind: SourceKind,
+  pageCount: number
+): string => {
+  const sourceDescription =
+    sourceKind === 'pdf'
+      ? `PDF (${pageCount} page${pageCount === 1 ? '' : 's'})`
+      : sourceKind === 'image'
+        ? 'image file'
+        : sourceKind === 'docx'
+          ? 'DOCX file'
+          : 'text file';
+
+  return [
+    `Student submission extracted from file: ${fileName}`,
+    `Source type: ${sourceDescription}`,
+    sourceKind === 'docx' || sourceKind === 'text'
+      ? 'Formatting: extracted plain text.'
+      : 'Formatting: OCR markdown generated by deepseek-ocr:latest.',
+    '',
+    markdown.trim(),
+  ].join('\n');
+};
+
+const extractMarkdownFromFile = async (
+  file: File
+): Promise<{ markdown: string; sourceKind: SourceKind; pageCount: number }> => {
+  if (isPdfFile(file)) {
+    const imagePages = await convertPdfToImagePages(file);
+    const markdown = await flattenImagePagesToMarkdown(imagePages);
+    return { markdown, sourceKind: 'pdf', pageCount: imagePages.length };
+  }
+
+  if (isDocxFile(file)) {
+    const markdown = await convertDocxToText(file);
+    return { markdown, sourceKind: 'docx', pageCount: 1 };
+  }
+
+  if (isImageFile(file)) {
+    const imageBase64 = await fileToBase64(file);
+    const markdown = await flattenImagePagesToMarkdown([imageBase64]);
+    return { markdown, sourceKind: 'image', pageCount: 1 };
+  }
+
+  if (isTextFile(file)) {
+    const markdown = (await file.text()).trim();
+    return { markdown, sourceKind: 'text', pageCount: 1 };
+  }
+
+  throw new Error(`Unsupported file type: ${file.name}`);
+};
+
+export const processRubricUpload = async (file: File): Promise<ProcessedRubricDocument> => {
+  const { markdown, sourceKind, pageCount } = await extractMarkdownFromFile(file);
+
+  if (!markdown.trim()) {
+    throw new Error(`No rubric content extracted from ${file.name}.`);
+  }
+
+  return {
+    markdown,
+    sourceKind,
+    pageCount,
+    context: formatRubricContext(markdown, sourceKind, pageCount),
+  };
+};
+
+export const processSubmissionUpload = async (file: File): Promise<ProcessedSubmissionDocument> => {
+  const { markdown, sourceKind, pageCount } = await extractMarkdownFromFile(file);
+
+  if (!markdown.trim()) {
+    throw new Error(`No submission content extracted from ${file.name}.`);
+  }
+
+  return {
+    markdown,
+    sourceKind,
+    pageCount,
+    content: formatSubmissionContext(file.name, markdown, sourceKind, pageCount),
+  };
+};
