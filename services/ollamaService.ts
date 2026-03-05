@@ -139,6 +139,7 @@ const GRADE_RESULT_JSON_SCHEMA = `{
 export const parseRubricFromMarkdown = async (
   rubricMarkdown: string
 ): Promise<RubricCriterion[]> => {
+  console.log(`[RubricExtraction][criteria.parse.start] Sending extracted OCR/text to ${MODEL_NAME} for rubric JSON parsing (${rubricMarkdown.length} chars).`);
   const messages: OllamaMessage[] = [
     {
       role: 'system',
@@ -157,7 +158,9 @@ ${rubricMarkdown}`
 
   const responseText = await callOllama(messages, true);
   const result = parseModelJson(responseText);
-  return result.criteria || [];
+  const criteria = result.criteria || [];
+  console.log(`[RubricExtraction][criteria.parse.success] Parsed ${criteria.length} rubric criteria from model response.`);
+  return criteria;
 };
 
 export const parseRubricFromUrl = async (url: string): Promise<RubricCriterion[]> => {
