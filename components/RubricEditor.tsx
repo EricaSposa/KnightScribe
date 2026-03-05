@@ -48,8 +48,11 @@ const RubricEditor: React.FC<Props> = ({ rubric, setRubric, rubricContext, setRu
 
       const extractedCriteria = await parseRubricFromMarkdown(processedRubric.markdown);
       if (extractedCriteria.length > 0) {
-        setRubric([...rubric, ...extractedCriteria]);
+        // File import should replace any existing rubric criteria from prior state.
+        setRubric(extractedCriteria);
       } else {
+        // Avoid leaving stale criteria visible if OCR content was saved but parsing returned none.
+        setRubric([]);
         alert('Rubric text was extracted and saved, but no structured criteria were detected. Grading will still use the uploaded rubric context.');
       }
     } catch (error) {
