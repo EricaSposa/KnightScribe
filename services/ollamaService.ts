@@ -215,11 +215,21 @@ export const parseRubricFromMarkdown = async (
       role: 'system',
       content: `You are a rubric extraction assistant. Extract grading rubrics from documents and return them as JSON. 
 Output format: ${RUBRIC_JSON_SCHEMA}
-If the document doesn't specify points, default to 10.`
+If the document doesn't specify points, default to 10.
+
+Critical preservation rules:
+- Preserve ALL rubric wording and grading notes in the JSON descriptions.
+- Do NOT summarize, shorten, paraphrase, or rewrite for brevity.
+- Keep penalties, bonuses, caveats, examples, and conditional rules verbatim when possible.
+- Remove only layout noise such as HTML tags and obvious positional/layout artifacts (coordinates, style/layout metadata).`
     },
     {
       role: 'user',
       content: `Extract the grading rubric from this markdown/text. Return the result in the specified JSON format.
+
+Important:
+- Keep all meaningful rubric words.
+- Only discard position/layout/html artifacts.
 
 Document:
 ${rubricMarkdown}`
@@ -279,6 +289,8 @@ Feedback Style: ${styleInstruction}
 
 Grading Standards:
 ${structuredRubricBlock}${uploadedRubricBlock}
+
+If an uploaded rubric reference is present, treat it as full-fidelity rubric text and honor all grading details it contains.
 
 You MUST respond with valid JSON in this exact format:
 ${GRADE_RESULT_JSON_SCHEMA}
